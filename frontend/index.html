@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local RAG Lab</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f5f5f5;
+            color: #222;
+        }
+
+        header {
+            background: #111;
+            color: white;
+            padding: 20px;
+        }
+
+        header h1 {
+            margin: 0;
+        }
+
+        header p {
+            margin: 5px 0 0;
+            color: #bbb;
+        }
+
+        main {
+            max-width: 1100px;
+            margin: 30px auto;
+            padding: 0 20px;
+        }
+
+        .card {
+            background: white;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        h2 {
+            margin-top: 0;
+        }
+
+        input,
+        select,
+        button {
+            padding: 10px;
+            margin-top: 8px;
+        }
+
+        button {
+            cursor: pointer;
+            border: none;
+            border-radius: 6px;
+            background: #111;
+            color: white;
+        }
+
+        button:hover {
+            opacity: 0.85;
+        }
+
+        .status {
+            display: inline-block;
+            padding: 6px 10px;
+            border-radius: 20px;
+            background: #ddd;
+        }
+
+        .chat-box {
+            min-height: 150px;
+            padding: 15px;
+            background: #fafafa;
+            border-radius: 8px;
+            white-space: pre-wrap;
+        }
+
+        .source {
+            background: #eee;
+            padding: 10px;
+            margin-top: 8px;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 100px;
+            padding: 12px;
+            resize: vertical;
+        }
+
+        .row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        ul {
+            padding-left: 20px;
+        }
+    </style>
+</head>
+
+<body>
+
+<header>
+    <h1>Local RAG Lab</h1>
+    <p>Ask questions about your documents using local AI.</p>
+</header>
+
+<main>
+
+    <div class="card">
+        <h2>System Status</h2>
+        <div id="status" class="status">Checking...</div>
+    </div>
+
+    <div class="card">
+        <h2>Upload Documents</h2>
+
+        <input
+            type="file"
+            id="fileInput"
+            multiple
+            accept=".pdf,.txt,.md,.csv"
+        >
+
+        <br>
+
+        <button onclick="uploadFiles()">
+            Upload & Ingest
+        </button>
+
+        <p id="uploadStatus"></p>
+    </div>
+
+    <div class="card">
+        <h2>Knowledge Base</h2>
+
+        <button onclick="loadDocuments()">
+            Refresh Documents
+        </button>
+
+        <button onclick="deleteAllDocuments()">
+            Delete All
+        </button>
+
+        <ul id="documents"></ul>
+    </div>
+
+    <div class="card">
+        <h2>Chat Settings</h2>
+
+        <div class="row">
+            <label>
+                Model:
+                <select id="model">
+                    <option value="llama3.2:3b">
+                        llama3.2:3b
+                    </option>
+
+                    <option value="qwen2.5:3b">
+                        qwen2.5:3b
+                    </option>
+                </select>
+            </label>
+
+            <label>
+                Top-K:
+                <input
+                    id="topK"
+                    type="number"
+                    value="4"
+                    min="1"
+                    max="10"
+                >
+            </label>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Ask a Question</h2>
+
+        <textarea
+            id="question"
+            placeholder="Ask something about your documents..."
+        ></textarea>
+
+        <button onclick="askQuestion()">
+            Ask
+        </button>
+
+        <h3>Answer</h3>
+
+        <div id="answer" class="chat-box">
+            No question asked yet.
+        </div>
+
+        <h3>Retrieved Sources</h3>
+
+        <div id="sources"></div>
+    </div>
+
+</main>
+
+<script>
+
+async function checkHealth() {
+
+    const status =
+        document.getElementById("status");
+
+    try {
+
+        const response =
+            await fetch("/api/health");
+
+        if (!response.ok) {
+            throw new Error("Health check failed");
+        }
+
+        await response.json();
+
+        status.textContent =
+            "Backend connected ✓";
+
+    } catch (error) {
+
+        status.textContent =
+            "Backend unavailable";
+    }
+}
+
+
+async function uploadFiles() {
+
+    const input =
+        document.getElementById("fileInput");
+
+    const status =
+        document.getElementById("uploadStatus");
+
+    if (!input.files.length) {
+
+        status.textContent =
+            "Please select a file.";
+
+        return;
+    }
+
+    const formData =
+        new FormData();
+
+    for (const file of input.files) {
+        formData.append("files", file);
+    }
+
+    status.textContent =
+        "Uploading and processing...";
+
+    try {
+
+        const response =
+            await fetch(
+                "/api/ingest",
+                {
+                    method: "POST",
+                    body: formData
+                }
+            );
+
+        const data =
+            await response.json();
+
+        if (!response.ok) {
+
+            throw new Error(
+                data.detail || "Upload failed"
+            );
+        }
+
+        status.textContent =
+            "Upload complete ✓";
+
+        loadDocuments();
+
+    } catch (error) {
+
+        status.textContent =
+            "Error: " + error.message;
+    }
+}
+
+
+async function loadDocuments() {
+
+    const list =
+        document.getElementById("documents");
+
+    try {
+
+        const response =
+            await fetch("/api/documents");
+
+        const data =
+            await response.json();
+
+        list.innerHTML = "";
+
+        if (!data.documents.length) {
+
+            list.innerHTML =
+                "<li>No documents yet.</li>";
+
+            return;
+        }
+
+        for (const doc of data.documents) {
+
+            const li =
+                document.createElement("li");
+
+            li.textContent =
+                `${doc.source} — ${doc.chunks} chunks`;
+
+            list.appendChild(li);
+        }
+
+    } catch (error) {
+
+        list.innerHTML =
+            "<li>Could not load documents.</li>";
+    }
+}
+
+
+async function deleteAllDocuments() {
+
+    if (!confirm(
+        "Delete all documents?"
+    )) {
+        return;
+    }
+
+    await fetch(
+        "/api/documents",
+        {
+            method: "DELETE"
+        }
+    );
+
+    loadDocuments();
+}
+
+
+async function askQuestion() {
+
+    const question =
+        document
+            .getElementById("question")
+            .value
+            .trim();
+
+    const answerBox =
+        document.getElementById("answer");
+
+    const sourcesBox =
+        document.getElementById("sources");
+
+    const model =
+        document.getElementById("model").value;
+
+    const topK =
+        Number(
+            document.getElementById("topK").value
+        );
+
+    if (!question) {
+
+        answerBox.textContent =
+            "Please enter a question.";
+
+        return;
+    }
+
+    answerBox.textContent =
+        "Thinking...";
+
+    sourcesBox.innerHTML = "";
+
+    try {
+
+        const response =
+            await fetch(
+                "/api/ask",
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+
+                    body: JSON.stringify({
+                        question,
+                        model,
+                        top_k: topK
+                    })
+                }
+            );
+
+        if (!response.ok) {
+
+            const error =
+                await response.json();
+
+            throw new Error(
+                error.detail || "Request failed"
+            );
+        }
+
+        answerBox.textContent = "";
+
+        const reader =
+            response.body.getReader();
+
+        const decoder =
+            new TextDecoder();
+
+        let buffer = "";
+
+        while (true) {
+
+            const { value, done } =
+                await reader.read();
+
+            if (done) break;
+
+            buffer +=
+                decoder.decode(
+                    value,
+                    { stream: true }
+                );
+
+            const lines =
+                buffer.split("\n");
+
+            buffer =
+                lines.pop();
+
+            for (const line of lines) {
+
+                if (!line.trim()) continue;
+
+                const data =
+                    JSON.parse(line);
+
+                if (data.type === "sources") {
+
+                    showSources(
+                        data.sources
+                    );
+                }
+
+                if (data.type === "token") {
+
+                    answerBox.textContent +=
+                        data.content;
+                }
+            }
+        }
+
+    } catch (error) {
+
+        answerBox.textContent =
+            "Error: " + error.message;
+    }
+}
+
+
+function showSources(sources) {
+
+    const container =
+        document.getElementById("sources");
+
+    container.innerHTML = "";
+
+    for (const source of sources) {
+
+        const div =
+            document.createElement("div");
+
+        div.className = "source";
+
+        div.textContent =
+            `[${source.id}] ${source.source} | ` +
+            `chunk ${source.chunk} | ` +
+            `score: ${source.score.toFixed(3)}`;
+
+        container.appendChild(div);
+    }
+}
+
+
+checkHealth();
+loadDocuments();
+
+</script>
+
+</body>
+</html>

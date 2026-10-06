@@ -1,0 +1,17 @@
+.env
+
+__pycache__/
+*.pyc
+
+.venv/
+venv/
+
+node_modules/
+
+*.log
+
+data/
+qdrant_data/
+ollama_data/
+
+.DS_Store
